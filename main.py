@@ -7,40 +7,21 @@ import os
 import websocket
 from colorama import Fore, init
 
-# Force logs to show up immediately in Northflank
+# Force logs to show up immediately
 sys.stdout.reconfigure(line_buffering=True)
 init(autoreset=True)
 
 # --- Configuration ---
 GAME = os.getenv("GAME_TEXT", "Token Online")
-STREAM_URL = os.getenv("STREAM_URL", "https://twitch.tv/directory")
-STATUS_TYPE = os.getenv("STATUS_TYPE", "Playing")  # Playing, Streaming, Watching, Listening
-USER_STATUS = os.getenv("USER_STATUS", "online")  # online, dnd, idle
-RANDOM_MODE = os.getenv("RANDOM_MODE", "True").lower() == "true"
+# We will check for both common names to be safe
+raw_tokens = os.getenv("DISCORDTOKENS") or os.getenv("token1") or ""
 
 def get_presence():
-    if RANDOM_MODE:
-        current_type = random.choice(['Playing', 'Streaming', 'Watching', 'Listening'])
-        current_status = random.choice(['online', 'dnd', 'idle'])
-    else:
-        current_type = STATUS_TYPE
-        current_status = USER_STATUS
-
-    type_map = {"Playing": 0, "Streaming": 1, "Listening": 2, "Watching": 3}
-    t_int = type_map.get(current_type, 0)
-
-    game_name = GAME
-    if RANDOM_MODE:
-        if current_type == "Playing": game_name = random.choice(["Minecraft", "Roblox", "Fortnite"])
-        if current_type == "Listening": game_name = random.choice(["Spotify", "SoundCloud"])
-
     presence = {
-        "name": game_name,
-        "type": t_int,
-        "status": current_status
+        "name": GAME,
+        "type": 0, # Playing
+        "status": "online"
     }
-    if t_int == 1: presence["url"] = STREAM_URL
-    
     return presence
 
 def online_worker(token):
@@ -59,7 +40,7 @@ def online_worker(token):
                 "token": token,
                 "properties": {"$os": sys.platform, "$browser": "RTB", "$device": "Cloud-Server"},
                 "presence": {
-                    "game": {"name": presence_data["name"], "type": presence_data["type"], "url": presence_data.get("url")},
+                    "game": {"name": presence_data["name"], "type": presence_data["type"]},
                     "status": presence_data["status"],
                     "since": 0, "afk": False
                 }
@@ -75,33 +56,24 @@ def online_worker(token):
             print(f"{Fore.CYAN}[i] Heartbeat sent for {token[:15]}...")
             
     except Exception as e:
-        print(f"{Fore.RED}[!] Error on token {token[:10]}: {e}")
+        print(f"{Fore.RED}[!] Error on token: {e}")
 
 if __name__ == "__main__":
-    print(f"""{Fore.MAGENTA}
-    ▄▄▄▄▄▄▄▄▄▄▄  ▄▄▄▄▄▄▄▄▄▄▄  ▄    ▄  ▄▄▄▄▄▄▄▄▄▄▄ 
-    ▐░░░░░░░░░░░▌▐░░░░░░░░░░░▌▐░▌  ▐░▌▐░░░░░░░░░░░▌
-     ▀▀▀▀█░█▀▀▀▀ ▐░█▀▀▀▀▀▀▀█░▌▐░▌ ▐░▌ ▐░█▀▀▀▀▀▀▀▀▀ 
-          ▐░▌     ▐░▌       ▐░▌▐░▌▐░▌  ▐░▌         
-          ▐░▌     ▐░▌       ▐░▌▐░▌░▌   ▐░█▄▄▄▄▄▄▄▄▄ 
-          ▐░▌     ▐░▌       ▐░▌▐░░▌    ▐░░░░░░░░░░░▌
-    """)
+    print(f"{Fore.MAGENTA}--- STARTING SCRIPT ---")
     
-    # Correctly reading from your Northflank Environment Variable
-    raw_tokens = os.getenv("DISCORDTOKENS", "")
-    tokens = [t.strip() for t in raw_tokens.split(",") if t.strip()]
+    # DEBUG: This will show us EXACTLY what Northflank is giving the script
+    if not raw_tokens:
+        print(f"{Fore.RED}[!] FAILED: The variable 'DISCORDTOKENS' is empty or missing.")
+        # Print all available keys to help you troubleshoot
+        print(f"[i] Available variables: {list(os.environ.keys())}")
+    else:
+        tokens = [t.strip() for t in raw_tokens.split(",") if t.strip()]
+        print(f"{Fore.GREEN}[i] Success! Found {len(tokens)} token(s).")
+        
+        for token in tokens:
+            t = threading.Thread(target=online_worker, args=(token,))
+            t.daemon = True
+            t.start()
 
-    if not tokens:
-        print(f"{Fore.RED}[!] CRITICAL: No tokens found! Please check DISCORDTOKENS in Northflank.")
-        sys.exit(1)
-
-    print(f"{Fore.YELLOW}[i] Found {len(tokens)} tokens. Starting connection threads...")
-    
-    for token in tokens:
-        t = threading.Thread(target=online_worker, args=(token,))
-        t.daemon = True
-        t.start()
-
-    # Keep the main process running
     while True:
         time.sleep(1)
