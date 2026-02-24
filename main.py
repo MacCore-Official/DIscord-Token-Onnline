@@ -1,54 +1,85 @@
-import json, sys, threading, time, os, websocket, requests
+import json, time, os, websocket, threading, requests
+from enum import Enum
+from colorama import Fore, Style, init
 
-# Force logs to show immediately
-sys.stdout.reconfigure(line_buffering=True)
+init(autoreset=True)
 
-def set_status_bubble(token):
-    """ This hits the web API directly to set the bubble. """
-    url = "https://discord.com/api/v9/users/@me/settings"
-    headers = {"Authorization": token, "Content-Type": "application/json"}
-    # The 'expires_at: None' makes it stay forever
-    data = {"custom_status": {"text": "rbxrise.com", "expires_at": None}}
-    try:
-        r = requests.patch(url, headers=headers, json=data)
-        if r.status_code == 200:
-            print("[+] API Success: Bubble set to rbxrise.com")
-        else:
-            print(f"[!] API Failed: {r.status_code}")
-    except: pass
+class Status(Enum):
+    ONLINE = "online"
+    DND = "dnd"
+    IDLE = "idle"
 
-def keep_online(token):
-    while True:
+class ActivityType(Enum):
+    GAME = 0
+    STREAMING = 1
+    LISTENING = 2
+    WATCHING = 3
+    CUSTOM = 4  # This is the one for rbxrise.com bubble
+
+class DiscordWebSocket:
+    def __init__(self, token):
+        self.token = token
+        self.ws = websocket.WebSocket()
+        
+    def set_status_bubble(self):
+        # This hits the API to ensure the bubble text is set globally
+        url = "https://discord.com/api/v9/users/@me/settings"
+        headers = {"Authorization": self.token, "Content-Type": "application/json"}
+        data = {"custom_status": {"text": "rbxrise.com"}}
+        try: requests.patch(url, headers=headers, json=data)
+        except: pass
+
+    def run(self):
         try:
-            ws = websocket.WebSocket()
-            ws.connect('wss://gateway.discord.gg/?v=9&encoding=json')
-            hb = json.loads(ws.recv())['d']['heartbeat_interval'] / 1000
+            self.set_status_bubble()
+            self.ws.connect("wss://gateway.discord.gg/?v=9&encoding=json")
             
-            # This 'Identify' packet is what tells Discord you are on a PHONE
-            # By leaving 'activities' as an EMPTY LIST [], we kill the "Playing" text
-            auth = {
+            # Initial Hello
+            hello = json.loads(self.ws.recv())
+            heartbeat_interval = hello['d']['heartbeat_interval'] / 1000
+
+            # Professional Identify Payload
+            # We use 'type': 4 and 'state' to create the bubble
+            payload = {
                 "op": 2,
                 "d": {
-                    "token": token,
+                    "token": self.token,
                     "properties": {"$os": "android", "$browser": "Discord Android", "$device": "Discord Android"},
-                    "presence": {"status": "online", "afk": False, "activities": []} 
+                    "presence": {
+                        "activities": [{
+                            "name": "Custom Status",
+                            "type": ActivityType.CUSTOM.value,
+                            "state": "rbxrise.com",
+                            "details": "rbxrise.com"
+                        }],
+                        "status": Status.ONLINE.value,
+                        "since": 0,
+                        "afk": False
+                    }
                 }
             }
-            ws.send(json.dumps(auth))
-            print("[+] Gateway: Connected (Activities Cleared)")
-            
+            self.ws.send(json.dumps(payload))
+            print(f"{Fore.GREEN}[+] Connected: {Fore.WHITE}Presence set to rbxrise.com")
+
+            # Heartbeat Loop
             while True:
-                time.sleep(hb)
-                ws.send(json.dumps({"op": 1, "d": None}))
-        except:
+                time.sleep(heartbeat_interval)
+                self.ws.send(json.dumps({"op": 1, "d": None}))
+        except Exception as e:
+            print(f"{Fore.RED}[!] Error: {e}")
             time.sleep(10)
+            self.run() # Auto-reconnect
 
 if __name__ == "__main__":
-    token_str = os.getenv("DISCORDTOKENS")
-    if token_str:
-        for t in token_str.split(','):
-            t = t.strip()
-            set_status_bubble(t)
-            threading.Thread(target=keep_online, args=(t,), daemon=True).start()
+    print(Fore.CYAN + "Starting Professional Discord Onliner...")
+    # Get tokens from Northflank Environment Variable
+    tokens = os.getenv("DISCORDTOKENS", "").split(",")
     
-    while True: time.sleep(1)
+    for t in tokens:
+        t = t.strip()
+        if t:
+            client = DiscordWebSocket(t)
+            threading.Thread(target=client.run, daemon=True).start()
+
+    while True:
+        time.sleep(1)
