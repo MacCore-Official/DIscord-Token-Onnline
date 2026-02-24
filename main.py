@@ -80,8 +80,9 @@ def online_worker(token):
 
 if __name__ == "__main__":
     # Fetch tokens from Environment Variable "DISCORD_TOKENS" (comma separated)
-    raw_tokens = os.getenv("DISCORD_TOKENS", "")
-    tokens = [t.strip() for t in raw_tokens.split(",") if t.strip()]
+# Change this to match whatever you renamed your key to in Northflank
+raw_tokens = os.getenv("DISCORDTOKENS", "")   
+tokens = [t.strip() for t in raw_tokens.split(",") if t.strip()]
 
     if not tokens:
         print(f"{Fore.RED}[!] No tokens found. Set DISCORD_TOKENS env var.")
