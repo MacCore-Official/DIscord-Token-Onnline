@@ -1,79 +1,72 @@
 import json, time, os, websocket, threading, requests, ssl
-from enum import Enum
 from colorama import Fore, init
 
 init(autoreset=True)
 
-# YOUR CONFIG
 MY_USER_ID = "1269145029943758899"
+active_workers = [] # Store workers here to trigger live updates
 
-class ActivityType(Enum):
-    CUSTOM = 4 
+class DiscordWorker:
+    def __init__(self, token):
+        self.token = token
+        self.ws = None
 
-# This list will hold all active websocket connections
-active_connections = []
-
-def update_all_statuses(new_text):
-    """Hits the API for every token to change the bubble globally."""
-    tokens = os.getenv("DISCORDTOKENS", "").split(",")
-    for t in tokens:
-        t = t.strip()
-        if t:
-            url = "https://discord.com/api/v9/users/@me/settings"
-            headers = {"Authorization": t, "Content-Type": "application/json"}
-            data = {"custom_status": {"text": new_text}}
-            try:
-                requests.patch(url, headers=headers, json=data, timeout=5)
-            except: pass
-    print(f"{Fore.YELLOW}[!] Status changed to: {new_text}")
-
-def on_message(ws, message):
-    data = json.loads(message)
-    
-    # Check if the message is a 'Message Create' event
-    if data.get("t") == "MESSAGE_CREATE":
-        msg = data["d"]
-        content = msg.get("content", "")
-        author_id = msg.get("author", {}).get("id")
-
-        # ONLY trigger if the message is from YOU and starts with .change
-        if author_id == MY_USER_ID and content.startswith(".change "):
-            new_status = content.replace(".change ", "").strip()
-            update_all_statuses(new_status)
-
-def on_open(ws):
-    payload = {
-        "op": 2,
-        "d": {
-            "token": ws.token,
-            "properties": {"$os": "android", "$browser": "Discord Android", "$device": "Discord Android"},
-            "presence": {
-                "activities": [{"name": "Custom Status", "type": ActivityType.CUSTOM.value, "state": "rbxrise.com"}],
+    def send_presence(self, text):
+        """This is the exact structure Discord uses for the bubble."""
+        payload = {
+            "op": 3,
+            "d": {
+                "since": 0,
+                "activities": [{
+                    "type": 4, # Custom Activity
+                    "name": "Custom Status",
+                    "state": text,
+                    "id": "custom"
+                }],
                 "status": "online",
-                "since": 0, "afk": False
+                "afk": False
             }
         }
-    }
-    ws.send(json.dumps(payload))
-    print(f"{Fore.GREEN}[+] Worker online for token ending in ...{ws.token[-5:]}")
+        if self.ws and self.ws.sock and self.ws.sock.connected:
+            self.ws.send(json.dumps(payload))
 
-def run_client(token):
-    ws = websocket.WebSocketApp(
-        "wss://gateway.discord.gg/?v=9&encoding=json",
-        on_open=on_open,
-        on_message=on_message
-    )
-    ws.token = token
-    ws.run_forever(ping_interval=20, sslopt={"cert_reqs": ssl.CERT_NONE})
+    def on_message(self, ws, message):
+        data = json.loads(message)
+        if data.get("t") == "MESSAGE_CREATE":
+            msg = data["d"]
+            if msg.get("author", {}).get("id") == MY_USER_ID:
+                content = msg.get("content", "")
+                if content.startswith(".change "):
+                    new_text = content.replace(".change ", "").strip()
+                    print(f"{Fore.YELLOW}[!] Triggering mass update to: {new_text}")
+                    # Update EVERY worker currently running
+                    for worker in active_workers:
+                        worker.send_presence(new_text)
+
+    def run(self):
+        def on_open(ws):
+            self.ws = ws
+            self.send_presence("rbxrise.com") # Default status
+            print(f"{Fore.GREEN}[+] Worker Active: ...{self.token[-5:]}")
+
+        self.ws = websocket.WebSocketApp(
+            "wss://gateway.discord.gg/?v=9&encoding=json",
+            on_open=on_open,
+            on_message=self.on_message
+        )
+        self.ws.token = self.token
+        self.ws.run_forever(ping_interval=20, sslopt={"cert_reqs": ssl.CERT_NONE})
 
 if __name__ == "__main__":
-    print(Fore.CYAN + "Starting Remote-Controlled Discord Onliner...")
+    print(Fore.CYAN + "Starting Multi-Sync Discord Onliner...")
     tokens = os.getenv("DISCORDTOKENS", "").split(",")
     
     for t in tokens:
         t = t.strip()
         if t:
-            threading.Thread(target=run_client, args=(t,), daemon=True).start()
+            worker = DiscordWorker(t)
+            active_workers.append(worker)
+            threading.Thread(target=worker.run, daemon=True).start()
 
     while True:
         time.sleep(1)
