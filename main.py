@@ -1,18 +1,25 @@
 import json, sys, threading, time, os, websocket, requests
 
-# Force logs to show immediately
 sys.stdout.reconfigure(line_buffering=True)
 
 def set_status_bubble(token):
-    # Hardcoded status bubble update
     url = "https://discord.com/api/v9/users/@me/settings"
-    headers = {"Authorization": token, "Content-Type": "application/json"}
+    # Added headers to look like a real mobile app
+    headers = {
+        "Authorization": token,
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0 (Linux; Android 10; SM-G973F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/88.0.4324.181 Mobile Safari/537.36"
+    }
     data = {"custom_status": {"text": "rbxrise.com"}}
     try:
         r = requests.patch(url, headers=headers, json=data)
-        print(f"Status set to rbxrise.com (Code: {r.status_code})")
+        if r.status_code == 200:
+            print("SUCCESS: Status bubble set to rbxrise.com")
+        else:
+            print(f"FAILED: Discord rejected the status update. Code: {r.status_code}")
+            print(f"Response: {r.text}") # This tells us WHY it failed
     except Exception as e:
-        print(f"Error setting bubble: {e}")
+        print(f"Request Error: {e}")
 
 def keep_online(token):
     try:
@@ -20,8 +27,6 @@ def keep_online(token):
         ws.connect('wss://gateway.discord.gg/?v=9&encoding=json')
         heartbeat = json.loads(ws.recv())['d']['heartbeat_interval']
         
-        # Identify as a Mobile device (this often helps status bubbles stay)
-        # We send NO 'activities' array, which kills the "Playing" text
         auth = {
             "op": 2,
             "d": {
@@ -31,21 +36,22 @@ def keep_online(token):
             }
         }
         ws.send(json.dumps(auth))
-        print("Connected to WebSocket as Mobile (No Game Activity)")
         
         while True:
             time.sleep(heartbeat / 1000)
             ws.send(json.dumps({"op": 1, "d": None}))
-    except Exception as e:
-        print(f"WS Error: {e}")
+    except:
+        time.sleep(10)
+        keep_online(token)
 
 if __name__ == "__main__":
-    # Get your token from your existing DISCORDTOKENS secret
     token_str = os.getenv("DISCORDTOKENS")
     if token_str:
         for t in token_str.split(','):
             t = t.strip()
+            # Set the bubble first
             set_status_bubble(t)
+            # Start the online presence
             threading.Thread(target=keep_online, args=(t,), daemon=True).start()
     
     while True:
