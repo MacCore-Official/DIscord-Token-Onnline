@@ -4,54 +4,70 @@ from colorama import Fore, init
 
 init(autoreset=True)
 
-class Status(Enum):
-    ONLINE = "online"
+# YOUR CONFIG
+MY_USER_ID = "1269145029943758899"
 
 class ActivityType(Enum):
     CUSTOM = 4 
 
-def set_status_bubble(token):
-    url = "https://discord.com/api/v9/users/@me/settings"
-    headers = {"Authorization": token, "Content-Type": "application/json"}
-    data = {"custom_status": {"text": "rbxrise.com"}}
-    try:
-        requests.patch(url, headers=headers, json=data, timeout=10)
-    except:
-        pass
+# This list will hold all active websocket connections
+active_connections = []
+
+def update_all_statuses(new_text):
+    """Hits the API for every token to change the bubble globally."""
+    tokens = os.getenv("DISCORDTOKENS", "").split(",")
+    for t in tokens:
+        t = t.strip()
+        if t:
+            url = "https://discord.com/api/v9/users/@me/settings"
+            headers = {"Authorization": t, "Content-Type": "application/json"}
+            data = {"custom_status": {"text": new_text}}
+            try:
+                requests.patch(url, headers=headers, json=data, timeout=5)
+            except: pass
+    print(f"{Fore.YELLOW}[!] Status changed to: {new_text}")
+
+def on_message(ws, message):
+    data = json.loads(message)
+    
+    # Check if the message is a 'Message Create' event
+    if data.get("t") == "MESSAGE_CREATE":
+        msg = data["d"]
+        content = msg.get("content", "")
+        author_id = msg.get("author", {}).get("id")
+
+        # ONLY trigger if the message is from YOU and starts with .change
+        if author_id == MY_USER_ID and content.startswith(".change "):
+            new_status = content.replace(".change ", "").strip()
+            update_all_statuses(new_status)
 
 def on_open(ws):
-    # This sends the login immediately when the connection opens
-    token = ws.token
     payload = {
         "op": 2,
         "d": {
-            "token": token,
+            "token": ws.token,
             "properties": {"$os": "android", "$browser": "Discord Android", "$device": "Discord Android"},
             "presence": {
                 "activities": [{"name": "Custom Status", "type": ActivityType.CUSTOM.value, "state": "rbxrise.com"}],
-                "status": Status.ONLINE.value,
+                "status": "online",
                 "since": 0, "afk": False
             }
         }
     }
     ws.send(json.dumps(payload))
-    print(f"{Fore.GREEN}[+] Connected: {Fore.WHITE}Presence set to rbxrise.com")
+    print(f"{Fore.GREEN}[+] Worker online for token ending in ...{ws.token[-5:]}")
 
 def run_client(token):
-    set_status_bubble(token)
-    
-    # We use WebSocketApp for better stability and automatic pings
     ws = websocket.WebSocketApp(
         "wss://gateway.discord.gg/?v=9&encoding=json",
-        on_open=on_open
+        on_open=on_open,
+        on_message=on_message
     )
     ws.token = token
-    
-    # ping_interval=20 keeps the SSL connection from dying (Fixes _ssl.c:2501)
-    ws.run_forever(ping_interval=20, ping_timeout=10, sslopt={"cert_reqs": ssl.CERT_NONE})
+    ws.run_forever(ping_interval=20, sslopt={"cert_reqs": ssl.CERT_NONE})
 
 if __name__ == "__main__":
-    print(Fore.CYAN + "Starting Stabilized Discord Onliner...")
+    print(Fore.CYAN + "Starting Remote-Controlled Discord Onliner...")
     tokens = os.getenv("DISCORDTOKENS", "").split(",")
     
     for t in tokens:
