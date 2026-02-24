@@ -1,10 +1,10 @@
 import json
-import random
 import sys
 import threading
 import time
 import os
 import websocket
+import requests
 from colorama import Fore, init
 
 # Force logs to show up immediately
@@ -12,68 +12,67 @@ sys.stdout.reconfigure(line_buffering=True)
 init(autoreset=True)
 
 # --- Configuration ---
-GAME = os.getenv("GAME_TEXT", "Token Online")
-# We will check for both common names to be safe
-raw_tokens = os.getenv("DISCORDTOKENS") or os.getenv("token1") or ""
+# Set your message in Northflank using the Key: CUSTOM_STATUS
+STATUS_TEXT = os.getenv("CUSTOM_STATUS", "Online Forever")
+# online, dnd, idle
+USER_STATUS = os.getenv("USER_STATUS", "online")
 
-def get_presence():
-    presence = {
-        "name": GAME,
-        "type": 0, # Playing
-        "status": "online"
-    }
-    return presence
+def set_custom_status(token, text):
+    """This function sets the 'Custom Status' bubble text."""
+    header = {"Authorization": token, "Content-Type": "application/json"}
+    data = {"custom_status": {"text": text}}
+    try:
+        r = requests.patch("https://discord.com/api/v9/users/@me/settings", headers=header, json=data)
+        if r.status_code == 200:
+            print(f"{Fore.GREEN}[+] Custom Status set to: {text}")
+        else:
+            print(f"{Fore.RED}[!] Failed to set status bubble: {r.status_code}")
+    except Exception as e:
+        print(f"{Fore.RED}[!] Request Error: {e}")
 
 def online_worker(token):
     try:
+        # 1. Set the text bubble via API
+        set_custom_status(token, STATUS_TEXT)
+
+        # 2. Keep the account 'Online' via WebSocket
         ws = websocket.WebSocket()
-        ws.connect('wss://gateway.discord.gg/?v=6&encoding=json')
+        ws.connect('wss://gateway.discord.gg/?v=9&encoding=json')
         
         hello = json.loads(ws.recv())
         heartbeat_interval = hello['d']['heartbeat_interval']
         
-        presence_data = get_presence()
-        
+        # Identity payload (No 'game' activity included here)
         auth = {
             "op": 2,
             "d": {
                 "token": token,
-                "properties": {"$os": sys.platform, "$browser": "RTB", "$device": "Cloud-Server"},
-                "presence": {
-                    "game": {"name": presence_data["name"], "type": presence_data["type"]},
-                    "status": presence_data["status"],
-                    "since": 0, "afk": False
-                }
+                "properties": {"$os": "linux", "$browser": "Chrome", "$device": ""},
+                "presence": {"status": USER_STATUS, "afk": False}
             }
         }
         
         ws.send(json.dumps(auth))
-        print(f"{Fore.GREEN}[+] Authenticated: {token[:15]}...")
+        print(f"{Fore.GREEN}[+] WebSocket Connected for {token[:15]}...")
 
         while True:
             time.sleep(heartbeat_interval / 1000)
             ws.send(json.dumps({"op": 1, "d": None}))
-            print(f"{Fore.CYAN}[i] Heartbeat sent for {token[:15]}...")
             
     except Exception as e:
-        print(f"{Fore.RED}[!] Error on token: {e}")
+        print(f"{Fore.RED}[!] Error: {e}")
 
 if __name__ == "__main__":
-    print(f"{Fore.MAGENTA}--- STARTING SCRIPT ---")
-    
-    # DEBUG: This will show us EXACTLY what Northflank is giving the script
-    if not raw_tokens:
-        print(f"{Fore.RED}[!] FAILED: The variable 'DISCORDTOKENS' is empty or missing.")
-        # Print all available keys to help you troubleshoot
-        print(f"[i] Available variables: {list(os.environ.keys())}")
-    else:
-        tokens = [t.strip() for t in raw_tokens.split(",") if t.strip()]
-        print(f"{Fore.GREEN}[i] Success! Found {len(tokens)} token(s).")
-        
-        for token in tokens:
-            t = threading.Thread(target=online_worker, args=(token,))
-            t.daemon = True
-            t.start()
+    raw_tokens = os.getenv("DISCORDTOKENS") or ""
+    tokens = [t.strip() for t in raw_tokens.split(",") if t.strip()]
+
+    if not tokens:
+        print(f"{Fore.RED}[!] No tokens found in DISCORDTOKENS variable.")
+        sys.exit(1)
+
+    print(f"{Fore.CYAN}--- Setting Normal Custom Status ---")
+    for token in tokens:
+        threading.Thread(target=online_worker, args=(token,), daemon=True).start()
 
     while True:
         time.sleep(1)
