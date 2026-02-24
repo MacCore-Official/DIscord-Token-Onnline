@@ -1,77 +1,54 @@
 import json, sys, threading, time, os, websocket, requests
 
+# Force logs to show immediately
 sys.stdout.reconfigure(line_buffering=True)
 
-def force_status_bubble(token):
-    """ This hits the web API directly to set the bubble, just like the website does. """
+def set_status_bubble(token):
+    """ This hits the web API directly to set the bubble. """
     url = "https://discord.com/api/v9/users/@me/settings"
     headers = {"Authorization": token, "Content-Type": "application/json"}
-    payload = {
-        "custom_status": {
-            "text": "rbxrise.com",
-            "expires_at": None
-        }
-    }
+    # The 'expires_at: None' makes it stay forever
+    data = {"custom_status": {"text": "rbxrise.com", "expires_at": None}}
     try:
-        r = requests.patch(url, headers=headers, json=payload)
+        r = requests.patch(url, headers=headers, json=data)
         if r.status_code == 200:
-            print("[+] API: Status bubble successfully forced to rbxrise.com")
+            print("[+] API Success: Bubble set to rbxrise.com")
         else:
-            print(f"[!] API Error: {r.status_code} - {r.text}")
-    except Exception as e:
-        print(f"[!] Request Failed: {e}")
+            print(f"[!] API Failed: {r.status_code}")
+    except: pass
 
-def run_gateway(token):
-    """ This keeps you online 24/7 without any 'Playing' text. """
+def keep_online(token):
     while True:
         try:
             ws = websocket.WebSocket()
             ws.connect('wss://gateway.discord.gg/?v=9&encoding=json')
+            hb = json.loads(ws.recv())['d']['heartbeat_interval'] / 1000
             
-            # Get heartbeat
-            hello = json.loads(ws.recv())
-            hb_interval = hello['d']['heartbeat_interval'] / 1000
-            
-            # MOBILE properties (This is the secret to hiding 'Playing' and showing the phone)
+            # This 'Identify' packet is what tells Discord you are on a PHONE
+            # By leaving 'activities' as an EMPTY LIST [], we kill the "Playing" text
             auth = {
                 "op": 2,
                 "d": {
                     "token": token,
-                    "properties": {
-                        "$os": "android",
-                        "$browser": "Discord Android",
-                        "$device": "Discord Android"
-                    },
-                    "presence": {
-                        "status": "online",
-                        "afk": False,
-                        "activities": [] # This MUST be an empty list to kill "Playing..."
-                    }
+                    "properties": {"$os": "android", "$browser": "Discord Android", "$device": "Discord Android"},
+                    "presence": {"status": "online", "afk": False, "activities": []} 
                 }
             }
             ws.send(json.dumps(auth))
-            print("[+] Gateway: Connected as Mobile. Activities cleared.")
+            print("[+] Gateway: Connected (Activities Cleared)")
             
             while True:
-                time.sleep(hb_interval)
+                time.sleep(hb)
                 ws.send(json.dumps({"op": 1, "d": None}))
-                # Re-sync bubble every 30 mins
-                force_status_bubble(token)
-                
-        except Exception as e:
-            print(f"[!] Connection dropped: {e}. Retrying...")
-            time.sleep(5)
+        except:
+            time.sleep(10)
 
 if __name__ == "__main__":
-    # Uses the variable you already have in Northflank
     token_str = os.getenv("DISCORDTOKENS")
     if token_str:
         for t in token_str.split(','):
             t = t.strip()
-            # 1. Force the bubble immediately
-            force_status_bubble(t)
-            # 2. Start the 24/7 connection
-            threading.Thread(target=run_gateway, args=(t,), daemon=True).start()
+            set_status_bubble(t)
+            threading.Thread(target=keep_online, args=(t,), daemon=True).start()
     
-    while True:
-        time.sleep(1)
+    while True: time.sleep(1)
