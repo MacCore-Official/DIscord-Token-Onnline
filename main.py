@@ -7,17 +7,18 @@ import os
 import websocket
 from colorama import Fore, init
 
-# Initialize Colorama for ANSI colors
+# Force logs to show up immediately in Northflank
+sys.stdout.reconfigure(line_buffering=True)
 init(autoreset=True)
 
 # --- Configuration ---
-GAME = os.getenv("GAME_TEXT", "Developing on Northflank")
+GAME = os.getenv("GAME_TEXT", "Token Online")
 STREAM_URL = os.getenv("STREAM_URL", "https://twitch.tv/directory")
 STATUS_TYPE = os.getenv("STATUS_TYPE", "Playing")  # Playing, Streaming, Watching, Listening
 USER_STATUS = os.getenv("USER_STATUS", "online")  # online, dnd, idle
 RANDOM_MODE = os.getenv("RANDOM_MODE", "True").lower() == "true"
 
-def get_presence(token_type):
+def get_presence():
     if RANDOM_MODE:
         current_type = random.choice(['Playing', 'Streaming', 'Watching', 'Listening'])
         current_status = random.choice(['online', 'dnd', 'idle'])
@@ -25,13 +26,12 @@ def get_presence(token_type):
         current_type = STATUS_TYPE
         current_status = USER_STATUS
 
-    # Map types to Discord API integers
     type_map = {"Playing": 0, "Streaming": 1, "Listening": 2, "Watching": 3}
     t_int = type_map.get(current_type, 0)
 
     game_name = GAME
     if RANDOM_MODE:
-        if current_type == "Playing": game_name = random.choice(["Minecraft", "Roblox", "Elden Ring"])
+        if current_type == "Playing": game_name = random.choice(["Minecraft", "Roblox", "Fortnite"])
         if current_type == "Listening": game_name = random.choice(["Spotify", "SoundCloud"])
 
     presence = {
@@ -48,11 +48,10 @@ def online_worker(token):
         ws = websocket.WebSocket()
         ws.connect('wss://gateway.discord.gg/?v=6&encoding=json')
         
-        # Initial Hello
         hello = json.loads(ws.recv())
         heartbeat_interval = hello['d']['heartbeat_interval']
         
-        presence_data = get_presence(STATUS_TYPE)
+        presence_data = get_presence()
         
         auth = {
             "op": 2,
@@ -68,31 +67,41 @@ def online_worker(token):
         }
         
         ws.send(json.dumps(auth))
-        print(f"{Fore.CYAN}[+] Authenticated: {token[:10]}...")
+        print(f"{Fore.GREEN}[+] Authenticated: {token[:15]}...")
 
         while True:
             time.sleep(heartbeat_interval / 1000)
             ws.send(json.dumps({"op": 1, "d": None}))
-            print(f"{Fore.GREEN}[i] Heartbeat sent for {token[:10]}...")
+            print(f"{Fore.CYAN}[i] Heartbeat sent for {token[:15]}...")
             
     except Exception as e:
         print(f"{Fore.RED}[!] Error on token {token[:10]}: {e}")
 
 if __name__ == "__main__":
-    # Fetch tokens from Environment Variable "DISCORD_TOKENS" (comma separated)
-# Change this to match whatever you renamed your key to in Northflank
-raw_tokens = os.getenv("DISCORDTOKENS", "")   
-tokens = [t.strip() for t in raw_tokens.split(",") if t.strip()]
+    print(f"""{Fore.MAGENTA}
+    ▄▄▄▄▄▄▄▄▄▄▄  ▄▄▄▄▄▄▄▄▄▄▄  ▄    ▄  ▄▄▄▄▄▄▄▄▄▄▄ 
+    ▐░░░░░░░░░░░▌▐░░░░░░░░░░░▌▐░▌  ▐░▌▐░░░░░░░░░░░▌
+     ▀▀▀▀█░█▀▀▀▀ ▐░█▀▀▀▀▀▀▀█░▌▐░▌ ▐░▌ ▐░█▀▀▀▀▀▀▀▀▀ 
+          ▐░▌     ▐░▌       ▐░▌▐░▌▐░▌  ▐░▌         
+          ▐░▌     ▐░▌       ▐░▌▐░▌░▌   ▐░█▄▄▄▄▄▄▄▄▄ 
+          ▐░▌     ▐░▌       ▐░▌▐░░▌    ▐░░░░░░░░░░░▌
+    """)
+    
+    # Correctly reading from your Northflank Environment Variable
+    raw_tokens = os.getenv("DISCORDTOKENS", "")
+    tokens = [t.strip() for t in raw_tokens.split(",") if t.strip()]
 
     if not tokens:
-        print(f"{Fore.RED}[!] No tokens found. Set DISCORD_TOKENS env var.")
+        print(f"{Fore.RED}[!] CRITICAL: No tokens found! Please check DISCORDTOKENS in Northflank.")
         sys.exit(1)
 
-    print(f"{Fore.MAGENTA}--- Starting Discord Status Bot on Northflank ---")
+    print(f"{Fore.YELLOW}[i] Found {len(tokens)} tokens. Starting connection threads...")
     
     for token in tokens:
-        threading.Thread(target=online_worker, args=(token,), daemon=True).start()
+        t = threading.Thread(target=online_worker, args=(token,))
+        t.daemon = True
+        t.start()
 
-    # Keep main thread alive
+    # Keep the main process running
     while True:
         time.sleep(1)
