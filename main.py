@@ -4,55 +4,60 @@ sys.stdout.reconfigure(line_buffering=True)
 
 def set_status_bubble(token):
     url = "https://discord.com/api/v9/users/@me/settings"
-    # Added headers to look like a real mobile app
-    headers = {
-        "Authorization": token,
-        "Content-Type": "application/json",
-        "User-Agent": "Mozilla/5.0 (Linux; Android 10; SM-G973F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/88.0.4324.181 Mobile Safari/537.36"
+    headers = {"Authorization": token, "Content-Type": "application/json"}
+    # This payload is what makes it stick
+    data = {
+        "custom_status": {
+            "text": "rbxrise.com",
+            "expires_at": None
+        }
     }
-    data = {"custom_status": {"text": "rbxrise.com"}}
     try:
-        r = requests.patch(url, headers=headers, json=data)
-        if r.status_code == 200:
-            print("SUCCESS: Status bubble set to rbxrise.com")
-        else:
-            print(f"FAILED: Discord rejected the status update. Code: {r.status_code}")
-            print(f"Response: {r.text}") # This tells us WHY it failed
-    except Exception as e:
-        print(f"Request Error: {e}")
+        requests.patch(url, headers=headers, json=data)
+        print("Successfully pushed rbxrise.com to Discord servers.")
+    except: pass
 
 def keep_online(token):
-    try:
-        ws = websocket.WebSocket()
-        ws.connect('wss://gateway.discord.gg/?v=9&encoding=json')
-        heartbeat = json.loads(ws.recv())['d']['heartbeat_interval']
-        
-        auth = {
-            "op": 2,
-            "d": {
-                "token": token,
-                "properties": {"$os": "android", "$browser": "Discord Android", "$device": "Discord Android"},
-                "presence": {"status": "online", "afk": False}
+    while True: # This loop ensures it restarts if it crashes
+        try:
+            ws = websocket.WebSocket()
+            ws.connect('wss://gateway.discord.gg/?v=9&encoding=json')
+            
+            # Get heartbeat interval from Discord
+            hello = json.loads(ws.recv())
+            heartbeat_interval = hello['d']['heartbeat_interval'] / 1000
+            
+            # Mobile identify (keeps you 'Online' without a game)
+            auth = {
+                "op": 2,
+                "d": {
+                    "token": token,
+                    "properties": {"$os": "android", "$browser": "Discord Android", "$device": "Discord Android"},
+                    "presence": {"status": "online", "afk": False}
+                }
             }
-        }
-        ws.send(json.dumps(auth))
-        
-        while True:
-            time.sleep(heartbeat / 1000)
-            ws.send(json.dumps({"op": 1, "d": None}))
-    except:
-        time.sleep(10)
-        keep_online(token)
+            ws.send(json.dumps(auth))
+            print("Connected! You are now 'Online' on Mobile.")
+            
+            # The Infinite Heartbeat
+            while True:
+                time.sleep(heartbeat_interval)
+                ws.send(json.dumps({"op": 1, "d": None}))
+                # Re-apply status bubble every hour just to be safe
+                set_status_bubble(token) 
+                
+        except Exception as e:
+            print(f"Connection lost, reconnecting in 10s... Error: {e}")
+            time.sleep(10)
 
 if __name__ == "__main__":
     token_str = os.getenv("DISCORDTOKENS")
     if token_str:
         for t in token_str.split(','):
             t = t.strip()
-            # Set the bubble first
-            set_status_bubble(t)
-            # Start the online presence
+            # Start the worker for each token
             threading.Thread(target=keep_online, args=(t,), daemon=True).start()
     
+    # Keep the main script running forever
     while True:
         time.sleep(1)
